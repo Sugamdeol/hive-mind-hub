@@ -18,7 +18,7 @@ import hashlib
 import secrets
 import os
 
-from database import SessionLocal, engine, Base, init_db
+from database import SessionLocal, engine, Base, init_db, DATABASE_URL
 from models import Agent, Task, Project
 
 # Create database tables with error handling
@@ -196,6 +196,24 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+@app.get("/debug/db")
+def debug_db():
+    """Debug database status"""
+    try:
+        db = SessionLocal()
+        agent_count = db.query(Agent).count()
+        db.close()
+        db_type = "postgresql" if "postgresql" in DATABASE_URL else "sqlite"
+        return {
+            "database": "connected",
+            "type": db_type,
+            "agents_table": "exists",
+            "agent_count": agent_count
+        }
+    except Exception as e:
+        import traceback
+        return {"database": "error", "error": str(e), "traceback": traceback.format_exc()}
 
 @app.post("/agent/register")
 def register_agent(agent_data: AgentRegister, db: Session = Depends(get_db)):
