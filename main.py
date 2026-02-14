@@ -24,11 +24,51 @@ from models import Agent, Task, Project
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+def hash_password(password: str) -> str:
+    """Simple password hashing"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def create_main_bot():
+    """Create main_bot admin agent on startup if not exists"""
+    db = SessionLocal()
+    try:
+        # Check if main_bot exists
+        main_bot = db.query(Agent).filter(Agent.name == "main_bot").first()
+        if not main_bot:
+            # Get password from env or use default
+            password = os.getenv("MAIN_BOT_PASSWORD", "admin123")
+            main_bot = Agent(
+                name="main_bot",
+                password_hash=hash_password(password),
+                is_main_bot=True,
+                capabilities=["admin", "all"],
+                status="online",
+                last_seen=datetime.utcnow()
+            )
+            db.add(main_bot)
+            db.commit()
+            print(f"✅ Created main_bot agent with password: {password}")
+        else:
+            # Ensure is_main_bot flag is set
+            if not main_bot.is_main_bot:
+                main_bot.is_main_bot = True
+                db.commit()
+                print("✅ Updated main_bot to admin status")
+    except Exception as e:
+        print(f"⚠️ Error creating main_bot: {e}")
+    finally:
+        db.close()
+
 app = FastAPI(
     title="Hive Mind Central Hub",
     description="Control center for distributed nanobot agents",
     version="1.0.0"
 )
+
+# Create main_bot on startup
+@app.on_event("startup")
+async def startup_event():
+    create_main_bot()
 
 # CORS for dashboard access
 app.add_middleware(
@@ -55,7 +95,7 @@ def serve_dashboard():
 security = HTTPBearer()
 
 # Configuration
-SECRET_KEY = secrets.token_hex(32)
+SECRET_KEY = os.getenv("SECRET_KEY", secrets.token_hex(32))
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7
 
@@ -78,261 +118,301 @@ class AgentLogin(BaseModel):
     password: str
 
 class TaskCreate(BaseModel):
-    title: str
-    description: str
+    agent_name: Optional[str] = None  # None = broadcast to all
+    task_type: str
     command: str
-    agent_id: Optional[int] = None
-    broadcast: bool = False
-
-class TaskResult(BaseModel):
-    task_id: int
-    result: str
-    success: bool = True
-
-class Heartbeat(BaseModel):
-    agent_id: int
+    description: Optional[str] = None
 
 class ProjectCreate(BaseModel):
     name: str
     description: str
+    tasks: List[dict] = []
 
-class ProjectDivide(BaseModel):
-    project_id: int
-    tasks: List[dict]
+class HeartbeatData(BaseModel):
+    status: str = "online"
+    current_task: Optional[str] = None
+
+class TaskResult(BaseModel):
+    success: bool
+    result: Optional[str] = None
+    error: Optional[str] = None
 
 # Helper functions
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def create_token(agent_name: str) -> str:
+    """Create JWT token for agent"""
+    expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    payload = {
+        "sub": agent_name,
+        "exp": expire,
+        "type": "agent"
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
+def verify_token(credentials: HTTPAuthorizationCredentials) -> str:
+    """Verify JWT token and return agent name"""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        return payload
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload.get("sub")
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
-# Agent endpoints
+def get_current_agent(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)) -> Agent:
+    """Get current authenticated agent"""
+    agent_name = verify_token(credentials)
+    agent = db.query(Agent).filter(Agent.name == agent_name).first()
+    if not agent:
+        raise HTTPException(status_code=401, detail="Agent not found")
+    return agent
+
+# Public endpoints
+@app.get("/")
+def root():
+    return {
+        "name": "Hive Mind Central Hub",
+        "version": "1.0.0",
+        "endpoints": {
+            "dashboard": "/dashboard",
+            "register": "/agent/register",
+            "login": "/agent/login",
+            "poll": "/agent/poll",
+            "admin": "/admin/*"
+        }
+    }
+
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
 @app.post("/agent/register")
 def register_agent(agent_data: AgentRegister, db: Session = Depends(get_db)):
-    # Check if agent name exists
+    """Register a new agent"""
+    # Check if agent exists
     existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Agent name already exists")
     
     # Create new agent
-    new_agent = Agent(
+    agent = Agent(
         name=agent_data.name,
         password_hash=hash_password(agent_data.password),
-        capabilities=",".join(agent_data.capabilities),
-        status="offline",
-        is_main_bot=False
+        capabilities=agent_data.capabilities,
+        is_main_bot=False,
+        status="offline"
     )
-    db.add(new_agent)
+    db.add(agent)
     db.commit()
-    db.refresh(new_agent)
+    db.refresh(agent)
     
     return {
-        "success": True,
-        "agent_id": new_agent.id,
-        "message": f"Agent '{agent_data.name}' registered successfully"
+        "message": "Agent registered successfully",
+        "agent_name": agent.name,
+        "is_main_bot": agent.is_main_bot
     }
 
 @app.post("/agent/login")
 def login_agent(login_data: AgentLogin, db: Session = Depends(get_db)):
+    """Login agent and get token"""
     agent = db.query(Agent).filter(Agent.name == login_data.name).first()
     if not agent or agent.password_hash != hash_password(login_data.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    # Update status
-    agent.status = "online"
+    # Update last seen
     agent.last_seen = datetime.utcnow()
+    agent.status = "online"
     db.commit()
     
     # Create token
-    token = create_access_token({
-        "agent_id": agent.id,
-        "name": agent.name,
-        "is_main_bot": agent.is_main_bot
-    })
+    token = create_token(agent.name)
     
     return {
-        "success": True,
-        "token": token,
-        "agent_id": agent.id,
-        "is_main_bot": agent.is_main_bot
+        "access_token": token,
+        "token_type": "bearer",
+        "agent_name": agent.name,
+        "is_main_bot": agent.is_main_bot,
+        "capabilities": agent.capabilities
     }
 
-@app.get("/agent/poll-tasks")
-def poll_tasks(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    agent_id = payload.get("agent_id")
-    
+@app.post("/agent/heartbeat")
+def agent_heartbeat(
+    heartbeat: HeartbeatData,
+    agent: Agent = Depends(get_current_agent),
+    db: Session = Depends(get_db)
+):
+    """Agent heartbeat - update status"""
+    agent.status = heartbeat.status
+    agent.last_seen = datetime.utcnow()
+    if heartbeat.current_task:
+        agent.current_task = heartbeat.current_task
+    db.commit()
+    return {"message": "Heartbeat received"}
+
+@app.get("/agent/poll")
+def poll_tasks(agent: Agent = Depends(get_current_agent), db: Session = Depends(get_db)):
+    """Poll for assigned tasks"""
     # Get pending tasks for this agent
     tasks = db.query(Task).filter(
-        Task.agent_id == agent_id,
+        Task.assigned_to == agent.name,
         Task.status == "pending"
     ).all()
     
-    # Also get broadcast tasks not yet assigned
+    # Also get broadcast tasks
     broadcast_tasks = db.query(Task).filter(
-        Task.agent_id == None,
+        Task.assigned_to == None,
         Task.status == "pending"
     ).all()
     
     all_tasks = tasks + broadcast_tasks
     
-    # Mark broadcast tasks as assigned to this agent
-    for task in broadcast_tasks:
-        task.agent_id = agent_id
-        task.status = "assigned"
-    db.commit()
-    
     return {
         "tasks": [
             {
-                "id": t.id,
-                "title": t.title,
-                "description": t.description,
-                "command": t.command,
-                "created_at": t.created_at.isoformat() if t.created_at else None
+                "id": task.id,
+                "type": task.task_type,
+                "command": task.command,
+                "description": task.description,
+                "created_at": task.created_at.isoformat() if task.created_at else None
             }
-            for t in all_tasks
+            for task in all_tasks
         ]
     }
 
-@app.post("/agent/report-result")
-def report_result(result: TaskResult, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    task = db.query(Task).filter(Task.id == result.task_id).first()
+@app.post("/agent/task/{task_id}/complete")
+def complete_task(
+    task_id: int,
+    result: TaskResult,
+    agent: Agent = Depends(get_current_agent),
+    db: Session = Depends(get_db)
+):
+    """Mark task as complete with result"""
+    task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    task.result = result.result
     task.status = "completed" if result.success else "failed"
+    task.result = result.result
+    task.error = result.error
     task.completed_at = datetime.utcnow()
+    task.completed_by = agent.name
     db.commit()
     
-    return {"success": True, "message": "Result recorded"}
-
-@app.post("/agent/heartbeat")
-def heartbeat(hb: Heartbeat, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == hb.agent_id).first()
-    if agent:
-        agent.last_seen = datetime.utcnow()
-        if agent.status != "busy":
-            agent.status = "online"
-        db.commit()
-    
-    return {"success": True}
+    return {"message": "Task result recorded"}
 
 # Admin endpoints (main bot only)
-@app.get("/admin/agents")
-def list_agents(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    if not payload.get("is_main_bot"):
+def require_admin(agent: Agent = Depends(get_current_agent)):
+    """Require admin (main_bot) privileges"""
+    if not agent.is_main_bot:
         raise HTTPException(status_code=403, detail="Admin access required")
-    
+    return agent
+
+@app.get("/admin/agents")
+def list_agents(admin: Agent = Depends(require_admin), db: Session = Depends(get_db)):
+    """List all registered agents"""
     agents = db.query(Agent).all()
     return {
         "agents": [
             {
-                "id": a.id,
                 "name": a.name,
                 "status": a.status,
-                "capabilities": a.capabilities.split(",") if a.capabilities else [],
+                "capabilities": a.capabilities,
+                "is_main_bot": a.is_main_bot,
                 "last_seen": a.last_seen.isoformat() if a.last_seen else None,
-                "is_main_bot": a.is_main_bot
+                "current_task": a.current_task
             }
             for a in agents
         ]
     }
 
 @app.post("/admin/task/assign")
-def assign_task(task_data: TaskCreate, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    if not payload.get("is_main_bot"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    new_task = Task(
-        title=task_data.title,
-        description=task_data.description,
+def assign_task(
+    task_data: TaskCreate,
+    admin: Agent = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Assign task to specific agent or broadcast"""
+    task = Task(
+        task_type=task_data.task_type,
         command=task_data.command,
-        agent_id=None if task_data.broadcast else task_data.agent_id,
+        description=task_data.description,
+        assigned_to=task_data.agent_name,  # None = broadcast
         status="pending",
-        created_by=payload.get("agent_id"),
-        created_at=datetime.utcnow()
+        created_by=admin.name
     )
-    db.add(new_task)
+    db.add(task)
     db.commit()
+    db.refresh(task)
     
     return {
-        "success": True,
-        "task_id": new_task.id,
-        "message": "Task created successfully"
+        "message": "Task assigned" if task_data.agent_name else "Task broadcast to all agents",
+        "task_id": task.id
     }
 
 @app.get("/admin/tasks")
-def list_tasks(status: Optional[str] = None, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    if not payload.get("is_main_bot"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    query = db.query(Task)
-    if status:
-        query = query.filter(Task.status == status)
-    
-    tasks = query.order_by(Task.created_at.desc()).all()
-    
+def list_tasks(admin: Agent = Depends(require_admin), db: Session = Depends(get_db)):
+    """List all tasks"""
+    tasks = db.query(Task).order_by(Task.created_at.desc()).all()
     return {
         "tasks": [
             {
                 "id": t.id,
-                "title": t.title,
-                "description": t.description,
+                "type": t.task_type,
                 "command": t.command,
+                "description": t.description,
+                "assigned_to": t.assigned_to,
                 "status": t.status,
-                "agent_id": t.agent_id,
-                "result": t.result,
+                "created_by": t.created_by,
+                "completed_by": t.completed_by,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
-                "completed_at": t.completed_at.isoformat() if t.completed_at else None
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                "result": t.result,
+                "error": t.error
             }
             for t in tasks
         ]
     }
 
 @app.post("/admin/project/create")
-def create_project(project_data: ProjectCreate, payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    if not payload.get("is_main_bot"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    new_project = Project(
+def create_project(
+    project_data: ProjectCreate,
+    admin: Agent = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    """Create a new project with tasks"""
+    project = Project(
         name=project_data.name,
         description=project_data.description,
-        status="active",
-        tasks_count=0,
-        completed_count=0
+        created_by=admin.name,
+        status="active"
     )
-    db.add(new_project)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    
+    # Add tasks if provided
+    for task_dict in project_data.tasks:
+        task = Task(
+            task_type=task_dict.get("type", "exec"),
+            command=task_dict.get("command", ""),
+            description=task_dict.get("description"),
+            assigned_to=task_dict.get("agent_name"),
+            project_id=project.id,
+            status="pending",
+            created_by=admin.name
+        )
+        db.add(task)
+    
     db.commit()
     
     return {
-        "success": True,
-        "project_id": new_project.id,
-        "message": "Project created successfully"
+        "message": "Project created",
+        "project_id": project.id,
+        "tasks_count": len(project_data.tasks)
     }
 
 @app.get("/admin/projects")
-def list_projects(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    if not payload.get("is_main_bot"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
+def list_projects(admin: Agent = Depends(require_admin), db: Session = Depends(get_db)):
+    """List all projects"""
     projects = db.query(Project).all()
     return {
         "projects": [
@@ -341,55 +421,42 @@ def list_projects(payload: dict = Depends(verify_token), db: Session = Depends(g
                 "name": p.name,
                 "description": p.description,
                 "status": p.status,
-                "tasks_count": p.tasks_count,
-                "completed_count": p.completed_count,
-                "progress": (p.completed_count / p.tasks_count * 100) if p.tasks_count > 0 else 0
+                "created_by": p.created_by,
+                "created_at": p.created_at.isoformat() if p.created_at else None
             }
             for p in projects
         ]
     }
 
+@app.post("/admin/broadcast")
+def broadcast_message(
+    message: str,
+    admin: Agent = Depends(require_admin)
+):
+    """Broadcast message to all agents"""
+    # This would integrate with your notification system
+    return {"message": "Broadcast sent", "content": message, "from": admin.name}
+
 @app.get("/admin/stats")
-def get_stats(payload: dict = Depends(verify_token), db: Session = Depends(get_db)):
-    if not payload.get("is_main_bot"):
-        raise HTTPException(status_code=403, detail="Admin access required")
-    
-    # Calculate stats
+def get_stats(admin: Agent = Depends(require_admin), db: Session = Depends(get_db)):
+    """Get system statistics"""
     total_agents = db.query(Agent).count()
     online_agents = db.query(Agent).filter(Agent.status == "online").count()
-    busy_agents = db.query(Agent).filter(Agent.status == "busy").count()
-    
     total_tasks = db.query(Task).count()
     pending_tasks = db.query(Task).filter(Task.status == "pending").count()
-    completed_today = db.query(Task).filter(
-        Task.status == "completed",
-        Task.completed_at >= datetime.utcnow().replace(hour=0, minute=0, second=0)
-    ).count()
+    completed_tasks = db.query(Task).filter(Task.status == "completed").count()
     
     return {
-        "total_agents": total_agents,
-        "online_agents": online_agents,
-        "busy_agents": busy_agents,
-        "offline_agents": total_agents - online_agents - busy_agents,
-        "total_tasks": total_tasks,
-        "pending_tasks": pending_tasks,
-        "completed_today": completed_today,
-        "active_projects": db.query(Project).filter(Project.status == "active").count()
-    }
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy"}
-
-@app.get("/")
-def root():
-    return {
-        "name": "Hive Mind Central Hub",
-        "version": "1.0.0",
-        "status": "running",
-        "endpoints": {
-            "agent": "/agent/*",
-            "admin": "/admin/*"
+        "agents": {
+            "total": total_agents,
+            "online": online_agents,
+            "offline": total_agents - online_agents
+        },
+        "tasks": {
+            "total": total_tasks,
+            "pending": pending_tasks,
+            "completed": completed_tasks,
+            "failed": total_tasks - pending_tasks - completed_tasks
         }
     }
 
