@@ -19,8 +19,10 @@ class Agent(Base):
     capabilities = Column(Text, default="")  # Comma-separated list
     is_main_bot = Column(Boolean, default=False)
     
-    # Relationships
-    tasks = relationship("Task", back_populates="agent")
+    # Relationships - tasks assigned to this agent
+    tasks = relationship("Task", foreign_keys="Task.agent_id", back_populates="assigned_agent")
+    # Tasks created by this agent
+    created_tasks = relationship("Task", foreign_keys="Task.created_by", back_populates="creator")
 
 class Task(Base):
     __tablename__ = "tasks"
@@ -37,8 +39,8 @@ class Task(Base):
     completed_at = Column(DateTime, nullable=True)
     
     # Relationships
-    agent = relationship("Agent", foreign_keys=[agent_id], back_populates="tasks")
-    creator = relationship("Agent", foreign_keys=[created_by])
+    assigned_agent = relationship("Agent", foreign_keys=[agent_id], back_populates="tasks")
+    creator = relationship("Agent", foreign_keys=[created_by], back_populates="created_tasks")
 
 class Project(Base):
     __tablename__ = "projects"

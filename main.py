@@ -18,11 +18,13 @@ import hashlib
 import secrets
 import os
 
-from database import SessionLocal, engine, Base
+from database import SessionLocal, engine, Base, init_db
 from models import Agent, Task, Project
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
+# Create database tables with error handling
+db_initialized = init_db()
+if not db_initialized:
+    print("WARNING: Database initialization failed. Some features may not work.")
 
 def hash_password(password: str) -> str:
     """Simple password hashing"""
