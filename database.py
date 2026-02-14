@@ -16,29 +16,38 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 RENDER = os.environ.get("RENDER", "false").lower() == "true"
 
+# DEBUG: Print what we're actually getting
+print(f"DEBUG DATABASE_URL from env: {DATABASE_URL}")
+print(f"DEBUG RENDER from env: {os.environ.get('RENDER', 'NOT SET')}")
+print(f"DEBUG RENDER parsed: {RENDER}")
+
 if DATABASE_URL:
     # Use PostgreSQL (Render provides this)
     if DATABASE_URL.startswith("postgres://"):
         # SQLAlchemy requires postgresql:// not postgres://
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
     
-    logger.info(f"Using PostgreSQL database")
+    logger.info(f"Using PostgreSQL database: {DATABASE_URL[:20]}...")
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 else:
     # SQLite for local development
     # On Render, use in-memory database (ephemeral filesystem)
     if RENDER:
         DATABASE_URL = "sqlite:///:memory:"
+        print(f"DEBUG: Using in-memory SQLite")
         logger.info(f"Using in-memory SQLite (Render ephemeral)")
     else:
         DATABASE_PATH = "/tmp/hive_mind.db"
         DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+        print(f"DEBUG: Using file SQLite at {DATABASE_PATH}")
         logger.info(f"Using SQLite file: {DATABASE_PATH}")
     
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False}  # Required for SQLite
     )
+
+print(f"DEBUG FINAL DATABASE_URL: {DATABASE_URL}")
 
 # Session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

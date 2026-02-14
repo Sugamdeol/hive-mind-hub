@@ -200,6 +200,7 @@ def health_check():
 @app.get("/debug/db")
 def debug_db():
     """Debug database status"""
+    import os
     try:
         db = SessionLocal()
         agent_count = db.query(Agent).count()
@@ -208,12 +209,20 @@ def debug_db():
         return {
             "database": "connected",
             "type": db_type,
+            "database_url": DATABASE_URL,
+            "render_env": os.environ.get("RENDER", "not set"),
             "agents_table": "exists",
             "agent_count": agent_count
         }
     except Exception as e:
         import traceback
-        return {"database": "error", "error": str(e), "traceback": traceback.format_exc()}
+        return {
+            "database": "error", 
+            "error": str(e), 
+            "traceback": traceback.format_exc(),
+            "database_url": DATABASE_URL,
+            "render_env": os.environ.get("RENDER", "not set")
+        }
 
 @app.post("/agent/register")
 def register_agent(agent_data: AgentRegister, db: Session = Depends(get_db)):
