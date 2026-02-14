@@ -69,17 +69,17 @@ app = FastAPI(
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup"""
+    """Initialize database and create main_bot on startup"""
     print("Starting up Hive Mind Hub...")
+    
+    # Initialize database
     success = init_db()
     if success:
         print("Database ready")
     else:
         print("WARNING: Database initialization failed")
-
-# Create main_bot on startup
-@app.on_event("startup")
-async def startup_event():
+    
+    # Create main_bot admin
     create_main_bot()
 
 # CORS for dashboard access
