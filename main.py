@@ -218,34 +218,51 @@ def debug_db():
 @app.post("/agent/register")
 def register_agent(agent_data: AgentRegister, db: Session = Depends(get_db)):
     """Register a new agent"""
+    import traceback
     try:
+        print(f"DEBUG: Registration attempt for {agent_data.name}")
+        print(f"DEBUG: Capabilities: {agent_data.capabilities}")
+        
         # Check if agent exists
         existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
         if existing:
+            print(f"DEBUG: Agent {agent_data.name} already exists")
             raise HTTPException(status_code=400, detail="Agent name already exists")
         
         # Create new agent
+        print(f"DEBUG: Creating new agent object")
         agent = Agent(
             name=agent_data.name,
             password_hash=hash_password(agent_data.password),
-            capabilities=",".join(agent_data.capabilities),  # Convert list to string
+            capabilities=",".join(agent_data.capabilities) if agent_data.capabilities else "",
             is_main_bot=False,
             status="offline"
         )
+        print(f"DEBUG: Agent object created, adding to session")
         db.add(agent)
+        print(f"DEBUG: Committing to database")
         db.commit()
+        print(f"DEBUG: Refreshing agent")
         db.refresh(agent)
+        print(f"DEBUG: Registration successful")
         
         return {
             "message": "Agent registered successfully",
             "agent_name": agent.name,
             "is_main_bot": agent.is_main_bot
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        import traceback
-        print(f"Registration error: {e}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        error_trace = traceback.format_exc()
+        print(f"ERROR: Registration failed: {e}")
+        print(error_trace)
+        # Return detailed error for debugging
+        return {
+            "error": str(e),
+            "traceback": error_trace,
+            "detail": f"Registration failed: {str(e)}"
+        }
 
 @app.post("/agent/login")
 def login_agent(login_data: AgentLogin, db: Session = Depends(get_db)):
