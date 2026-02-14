@@ -24,8 +24,8 @@ if DATABASE_URL:
     logger.info(f"Using PostgreSQL database")
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 else:
-    # SQLite for local development
-    DATABASE_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "hub.db")
+    # SQLite for local development / Render
+    DATABASE_PATH = "/tmp/hive_mind.db"
     DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
     logger.info(f"Using SQLite database: {DATABASE_PATH}")
     engine = create_engine(
