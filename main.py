@@ -377,6 +377,10 @@ def get_stats(payload: dict = Depends(verify_token), db: Session = Depends(get_d
         "active_projects": db.query(Project).filter(Project.status == "active").count()
     }
 
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
 @app.get("/")
 def root():
     return {
