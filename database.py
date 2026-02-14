@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # Get database URL from environment or use SQLite as fallback
 DATABASE_URL = os.environ.get("DATABASE_URL")
+RENDER = os.environ.get("RENDER", "false").lower() == "true"
 
 if DATABASE_URL:
     # Use PostgreSQL (Render provides this)
@@ -24,10 +25,16 @@ if DATABASE_URL:
     logger.info(f"Using PostgreSQL database")
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 else:
-    # SQLite for local development / Render
-    DATABASE_PATH = "/tmp/hive_mind.db"
-    DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
-    logger.info(f"Using SQLite database: {DATABASE_PATH}")
+    # SQLite for local development
+    # On Render, use in-memory database (ephemeral filesystem)
+    if RENDER:
+        DATABASE_URL = "sqlite:///:memory:"
+        logger.info(f"Using in-memory SQLite (Render ephemeral)")
+    else:
+        DATABASE_PATH = "/tmp/hive_mind.db"
+        DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
+        logger.info(f"Using SQLite file: {DATABASE_PATH}")
+    
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False}  # Required for SQLite
