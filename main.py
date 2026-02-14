@@ -200,51 +200,66 @@ def health_check():
 @app.post("/agent/register")
 def register_agent(agent_data: AgentRegister, db: Session = Depends(get_db)):
     """Register a new agent"""
-    # Check if agent exists
-    existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Agent name already exists")
-    
-    # Create new agent
-    agent = Agent(
-        name=agent_data.name,
-        password_hash=hash_password(agent_data.password),
-        capabilities=agent_data.capabilities,
-        is_main_bot=False,
-        status="offline"
-    )
-    db.add(agent)
-    db.commit()
-    db.refresh(agent)
-    
-    return {
-        "message": "Agent registered successfully",
-        "agent_name": agent.name,
-        "is_main_bot": agent.is_main_bot
-    }
+    try:
+        # Check if agent exists
+        existing = db.query(Agent).filter(Agent.name == agent_data.name).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Agent name already exists")
+        
+        # Create new agent
+        agent = Agent(
+            name=agent_data.name,
+            password_hash=hash_password(agent_data.password),
+            capabilities=",".join(agent_data.capabilities),  # Convert list to string
+            is_main_bot=False,
+            status="offline"
+        )
+        db.add(agent)
+        db.commit()
+        db.refresh(agent)
+        
+        return {
+            "message": "Agent registered successfully",
+            "agent_name": agent.name,
+            "is_main_bot": agent.is_main_bot
+        }
+    except Exception as e:
+        import traceback
+        print(f"Registration error: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
 
 @app.post("/agent/login")
 def login_agent(login_data: AgentLogin, db: Session = Depends(get_db)):
     """Login agent and get token"""
-    agent = db.query(Agent).filter(Agent.name == login_data.name).first()
-    if not agent or agent.password_hash != hash_password(login_data.password):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    # Update last seen
-    agent.last_seen = datetime.utcnow()
-    agent.status = "online"
-    db.commit()
-    
-    # Create token
-    token = create_token(agent.name)
-    
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "agent_name": agent.name,
-        "is_main_bot": agent.is_main_bot,
-        "capabilities": agent.capabilities
-    }
+    try:
+        agent = db.query(Agent).filter(Agent.name == login_data.name).first()
+        if not agent or agent.password_hash != hash_password(login_data.password):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        # Update last seen
+        agent.last_seen = datetime.utcnow()
+        agent.status = "online"
+        db.commit()
+        
+        # Create token
+        token = create_token(agent.name)
+        
+        # Convert capabilities string to list
+        caps = agent.capabilities.split(",") if agent.capabilities else []
+        
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "agent_name": agent.name,
+            "is_main_bot": agent.is_main_bot,
+            "capabilities": caps
+        }
+    except Exception as e:
+        import traceback
+        print(f"Login error: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
 
 @app.post("/agent/heartbeat")
 def agent_heartbeat(
