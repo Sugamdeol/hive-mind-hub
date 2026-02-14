@@ -67,6 +67,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database on startup"""
+    print("Starting up Hive Mind Hub...")
+    success = init_db()
+    if success:
+        print("Database ready")
+    else:
+        print("WARNING: Database initialization failed")
+
 # Create main_bot on startup
 @app.on_event("startup")
 async def startup_event():
