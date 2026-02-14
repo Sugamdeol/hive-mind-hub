@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hive Mind Central Hub</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            min-height: 100vh;
+        }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        header {
+            text-align: center;
+            padding: 40px 0;
+            border-bottom: 2px solid #e94560;
+        }
+        h1 { font-size: 3rem; margin-bottom: 10px; }
+        h1 span { color: #e94560; }
+        .subtitle { color: #a0a0a0; font-size: 1.2rem; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border: 1px solid rgba(233,69,96,0.3);
+            transition: transform 0.3s;
+        }
+        .stat-card:hover { transform: translateY(-5px); }
+        .stat-card h3 { color: #e94560; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 10px; }
+        .stat-value { font-size: 2.5rem; font-weight: bold; }
+        .section {
+            background: rgba(255,255,255,0.03);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .section h2 { color: #e94560; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        th { color: #e94560; text-transform: uppercase; font-size: 0.8rem; }
+        .status {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+        .status.online { background: #00d9ff; color: #000; }
+        .status.offline { background: #666; }
+        .status.busy { background: #e94560; }
+        .status.pending { background: #ffd700; color: #000; }
+        .status.completed { background: #00ff88; color: #000; }
+        .btn {
+            background: #e94560;
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+        .btn:hover { background: #ff6b6b; transform: scale(1.05); }
+        .login-form {
+            max-width: 400px;
+            margin: 50px auto;
+            text-align: center;
+        }
+        input {
+            width: 100%;
+            padding: 15px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            font-size: 1rem;
+        }
+        input::placeholder { color: #888; }
+        .hidden { display: none; }
+        #message { text-align: center; padding: 20px; color: #00ff88; }
+        .loading { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><span>Hive</span> Mind Hub</h1>
+            <p class="subtitle">Central Control for Distributed Nanobot Agents</p>
+        </header>
+
+        <div id="login-section" class="login-form">
+            <h2 style="color: #e94560; margin-bottom: 20px;">Admin Login</h2>
+            <input type="text" id="agent-name" placeholder="Agent Name (main_bot)" value="main_bot">
+            <input type="password" id="agent-password" placeholder="Password">
+            <button class="btn" onclick="login()">Connect to Hub</button>
+            <p id="login-error" style="color: #e94560; margin-top: 15px;"></p>
+        </div>
+
+        <div id="dashboard" class="hidden">
+            <div id="message">Connected to Hive Mind Hub</div>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <h3>Total Agents</h3>
+                    <div class="stat-value" id="total-agents">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Online Agents</h3>
+                    <div class="stat-value" id="online-agents" style="color: #00ff88;">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Pending Tasks</h3>
+                    <div class="stat-value" id="pending-tasks" style="color: #ffd700;">-</div>
+                </div>
+                <div class="stat-card">
+                    <h3>Completed Today</h3>
+                    <div class="stat-value" id="completed-today">-</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>🤖 Active Agents</h2>
+                <table>
+                    <thead>
+                        <tr><th>Name</th><th>Status</th><th>Capabilities</th><th>Last Seen</th></tr>
+                    </thead>
+                    <tbody id="agents-table"></tbody>
+                </table>
+            </div>
+
+            <div class="section">
+                <h2>📋 Recent Tasks</h2>
+                <table>
+                    <thead>
+                        <tr><th>Title</th><th>Status</th><th>Assigned To</th><th>Created</th></tr>
+                    </thead>
+                    <tbody id="tasks-table"></tbody>
+                </table>
+            </div>
+
+            <div class="section">
+                <h2>📁 Projects</h2>
+                <table>
+                    <thead>
+                        <tr><th>Name</th><th>Status</th><th>Progress</th><th>Tasks</th></tr>
+                    </thead>
+                    <tbody id="projects-table"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin;
+        let token = localStorage.getItem('hive_token');
+
+        if (token) {
+            document.getElementById('login-section').classList.add('hidden');
+            document.getElementById('dashboard').classList.remove('hidden');
+            loadDashboard();
+        }
+
+        async function login() {
+            const name = document.getElementById('agent-name').value;
+            const password = document.getElementById('agent-password').value;
+            
+            try {
+                const res = await fetch(`${API_URL}/agent/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, password })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    token = data.token;
+                    localStorage.setItem('hive_token', token);
+                    document.getElementById('login-section').classList.add('hidden');
+                    document.getElementById('dashboard').classList.remove('hidden');
+                    loadDashboard();
+                } else {
+                    document.getElementById('login-error').textContent = 'Invalid credentials';
+                }
+            } catch (e) {
+                document.getElementById('login-error').textContent = 'Connection failed';
+            }
+        }
+
+        async function loadDashboard() {
+            try {
+                // Load stats
+                const statsRes = await fetch(`${API_URL}/admin/stats`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const stats = await statsRes.json();
+                
+                document.getElementById('total-agents').textContent = stats.total_agents || 0;
+                document.getElementById('online-agents').textContent = stats.online_agents || 0;
+                document.getElementById('pending-tasks').textContent = stats.pending_tasks || 0;
+                document.getElementById('completed-today').textContent = stats.completed_today || 0;
+
+                // Load agents
+                const agentsRes = await fetch(`${API_URL}/admin/agents`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const agents = await agentsRes.json();
+                
+                document.getElementById('agents-table').innerHTML = agents.agents.map(a => `
+                    <tr>
+                        <td>${a.name}${a.is_main_bot ? ' 👑' : ''}</td>
+                        <td><span class="status ${a.status}">${a.status}</span></td>
+                        <td>${a.capabilities.join(', ') || '-'}</td>
+                        <td>${a.last_seen ? new Date(a.last_seen).toLocaleString() : 'Never'}</td>
+                    </tr>
+                `).join('');
+
+                // Load tasks
+                const tasksRes = await fetch(`${API_URL}/admin/tasks`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const tasks = await tasksRes.json();
+                
+                document.getElementById('tasks-table').innerHTML = tasks.tasks.slice(0, 10).map(t => `
+                    <tr>
+                        <td>${t.title}</td>
+                        <td><span class="status ${t.status}">${t.status}</span></td>
+                        <td>${t.agent_id || 'Unassigned'}</td>
+                        <td>${t.created_at ? new Date(t.created_at).toLocaleString() : '-'}</td>
+                    </tr>
+                `).join('');
+
+                // Load projects
+                const projectsRes = await fetch(`${API_URL}/admin/projects`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const projects = await projectsRes.json();
+                
+                document.getElementById('projects-table').innerHTML = projects.projects.map(p => `
+                    <tr>
+                        <td>${p.name}</td>
+                        <td><span class="status ${p.status}">${p.status}</span></td>
+                        <td>${p.progress.toFixed(1)}%</td>
+                        <td>${p.completed_count}/${p.tasks_count}</td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load dashboard:', e);
+            }
+        }
+
+        // Auto-refresh every 30 seconds
+        setInterval(() => {
+            if (token) loadDashboard();
+        }, 30000);
+    </script>
+</body>
+</html>

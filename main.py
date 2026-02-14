@@ -39,8 +39,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve dashboard static files
-dashboard_path = os.path.join(os.path.dirname(__file__), "..", "dashboard")
+# Serve dashboard static files (in same directory for deployment)
+dashboard_path = os.path.join(os.path.dirname(__file__), "dashboard")
 if os.path.exists(dashboard_path):
     app.mount("/static", StaticFiles(directory=dashboard_path), name="static")
 
